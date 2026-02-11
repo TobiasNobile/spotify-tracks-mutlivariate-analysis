@@ -1,0 +1,939 @@
+---
+title: 'Rapport final : données Spotify'
+author: "CHARREYRE - GISSINGER - NOBILE - TERENTIEVA - VOLKAERT"
+date: "2025-04-22"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Introduction
+
+Ce rapport a pour vocation de résumer l'analyse multidimensionnelle menée sur les données Spotify.
+ 
+Afin d'analyser les données Spotify, nous avons suivi une démarche constituée de 3 étapes.
+ 
+Nous avons d'abord mené une exploration du jeu de données afin de comprendre sa structure.
+Ensuite nous avons déterminé les composantes principales, les grandes tendances qui le régissent.
+Enfin, nous avons identifié les groupes de morceaux musicaux qui constituent ce jeu de données.
+
+Avant de commencer à examiner ce jeu de données, nous pensions déjà pouvoir identifier des groupes de morceaux selon leur genre, voire identifier des morceaux à l'intersection de plusieurs genres.
+
+On trouvera en annexe le code R qui a servi à mener notre analyse.
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+
+```{r echo=FALSE}
+spotify = read.csv("spotify.csv")
+spotify <- spotify[,-1] # X
+spotify <- spotify[,-19] # time_signature
+
+spotify$mode <- as.factor(spotify$mode)
+levels(spotify$mode) <- c("mineure", "majeure")
+spotify$key <- as.factor(spotify$key)
+levels(spotify$key) <- c("C", "C#/Db", "D", "D#/Eb",
+"E", "F", "F#/Gb", "G",
+"G#/Ab", "A", "A#/Bb", "B")
+spotify$track_genre <- as.factor(spotify$track_genre)
+spotify$explicit <- as.logical(spotify$explicit)
+```
+
+
+# Structure globale du dataset Spotify
+
+```{r echo=FALSE,results='hide'}
+dimension = dim(spotify)
+```
+
+Les `r dimension[1]` morceaux Spotify sont décrits par `r dimension[2]` caractéristiques, dont 11 quantitatives et 8 qualitatives.
+
+Voici d'ailleurs ces différentes variables :
+
+```{r echo=FALSE}
+names(spotify)
+```
+Le tempo est exprimé en BPM.
+La variable "key" fait référence à la tonalité selon la notation standard de la classe de hauteur (Pitch Class).
+
+Comme lors de la phase d'exploration, on ajoute une variable qui mesure la durée d'un morceau en secondes.
+
+```{r echo=FALSE}
+spotify$duration_s = round(spotify$duration_ms/1000)
+```
+
+Voyons comment les variables qualitatives structurent le jeu de données :
+
+```{r echo=FALSE, warning=FALSE}
+library(questionr)
+layout(
+  matrix(c(
+    1, 1, 2,
+    1, 1, 3
+  ), nrow = 2, byrow = TRUE), 
+  widths = c(2, 1, 1), 
+  heights = c(1, 1)
+)
+par(mar = c(4, 4, 4, 2), oma = c(0, 0, 2, 0))
+barplot(freq(spotify$key)$`%`, names.arg = row.names(freq(spotify$key)), main = "Key")
+barplot(freq(spotify$explicit)$`%`, names.arg = row.names(freq(spotify$explicit)), main = "Explicit")
+barplot(freq(spotify$mode)$`%`, names.arg = row.names(freq(spotify$mode)), main = "Mode")
+mtext("Répartition des modalités parmi les morceaux", outer = TRUE, cex = 1.5)
+par(mfrow = c(1, 1))
+layout(1)
+```
+
+La plupart des morceaux ne contiennent pas de paroles vulgaires, et sont de modalité "majeure". On remarque que les morceaux de tonalité D#/Eb sont sous représentés, c'est-à-dire les morceaux ayant une sonorité "brillante" ou "claire".
+
+Une autre caractéristique intéressante est le genre. En analysant son comportement, nous avons vu qu'il comportait 114 modalités. Donc notre jeu de données est peuplé de 114 genres musicaux.
+Par ailleurs, ce jeu de données a été construit de manière à avoir un nombre égal de morceaux dans chaque genre.
+En effet, le jeu de données entier réunit 114000 morceaux, et l'analyse du genre nous dit que chacun des 114 genres est associé à 1000 morceaux.
+
+```{r, echo=FALSE}
+freq(spotify$track_genre)[1:5,]
+```
+
+Voyons maintenant comment les variables quantitatives structurent notre jeu de données, sans pour autant donner maintenant les composantes principales.
+
+Nous ne les analyserons pas toutes individuellement, mais uniquement celles où il paraît intéressant d'en tirer quelque chose de la répartition. Par exemple, on n'analyse pas les variables qui suivent une simple courbe en cloche.
+
+
+```{r echo=FALSE}
+par(mfrow = c(3, 3), mar = c(4, 4, 2, 1), oma = c(0, 0, 2, 0))
+
+hist(spotify$popularity, main = "Popularity", xlab ="")
+hist(spotify$duration_s, main = "Duration_s", xlab ="")
+hist(spotify$loudness, main = "Loudness", xlab ="")
+hist(spotify$speechiness, main = "Speechiness", xlab ="")
+hist(spotify$acousticness, main = "Acousticness", xlab ="")
+hist(spotify$instrumentalness, main = "Instrumentalness", xlab ="")
+hist(spotify$liveness, main = "Liveness", xlab ="")
+mtext("Distribution des variables quantitatives", outer = TRUE, cex = 1.5)
+
+par(mfrow = c(1, 1))
+```
+
+A la vue de ces graphiques, on remarque que globalement les morceaux ont une popularity (même si pour cette variable la distribution est homogène, on remarque la majorité de valeurs très faibles!), speechiness, acousticness, instrumentalness et liveness faibles. Autrement dit, cela signifie que la plupart des morceaux ont très peu d'écoutes, sont constitués majoritairement de musique (et pas de paroles), ne sont pas acoustiques (faible probabilité), ne sont pas non plus instrumentaux et ne sont pas détectés comme étant enregistrés en live.
+
+On observe aussi qu'une minorité de morceaux sont instrumentaux.
+Pour la durée, on ne peut pas dire que les morceaux durent moins longtemps, puisqu'un morceau se mesure en secondes et n'excède souvent pas quelques minutes.
+
+Le volume sonore (en dB) est calculé, pour notre jeu de données, d'une manière particulière et nous ne préférons pas interpréter sans connaître en profondeur ce calcul.
+
+Regardons maintenant comment nos variables quantitatives interagissent entre elles.
+On choisit de ne regarder que les variables corrélées entre elles à plus de 50% en valeur absolue.
+
+```{r echo=FALSE, warning=FALSE}
+par(mfrow = c(1, 1))
+library(reshape2)
+numeric_spotify <- spotify[sapply(spotify, is.numeric)] 
+cor_matrix <- round(cor(numeric_spotify[,-2], use = "pairwise.complete.obs"),2)
+cor_long <- melt(cor_matrix, varnames = c("Var1", "Var2"), value.name = "Correlation")
+cor_filtered <- cor_long[cor_long$Var1 != cor_long$Var2 & abs(cor_long$Correlation) > 0.50, ]
+cor_filtered_unique <- cor_filtered[!duplicated(t(apply(cor_filtered[,1:2], 1, sort))), ]
+cor_filtered_unique
+```
+
+```{r fig.height=9, fig.width=7, echo=FALSE}
+par(mfrow = c(3, 1), mar = c(5, 5, 3, 2), oma = c(0, 0, 3, 0))
+plot(spotify$energy, spotify$loudness, col = "darkblue", xlab = "energy", ylab = "loudness (en dB)")
+plot(spotify$acousticness, spotify$energy, col = "darkblue", xlab = "acousticness", ylab = "energy")
+plot(spotify$acousticness, spotify$loudness, col = "darkblue", xlab = "acousticness", ylab = "loudness (en dB)")
+par(mfrow = c(1, 1))
+```
+
+Pour le couple loudness/energy (premier graphique), le coefficient de corrélation positif à 0.76 se traduit par une relation linéaire croissante, et c'est normal : les morceaux avec une haute intensité musicale sont souvent bruyants.
+
+Pour le couple acousticness/energy (deuxième graphique), le coefficient de corrélation négatif à -0.73 se traduit par une relation linéaire décroissante, mais les morceaux sont tout de même très dispersés du point de vue de ces deux variables. Plus un morceau est acoustique, moins il est énergique.
+
+Enfin, pour le couple acousticness/loudness (troisième graphique), le coefficient de corrélation négatif à -0.59 indique une relation décroissante, mais pas forcément linéaire. Les points sont plus dispersés aux extrémités.
+Les morceaux acoustiques ont tendance à être moins bruyants, car ils sont souvent enregistrés avec des instruments naturels.
+
+
+Croiser les variables qualitatives n'a pas donné lieu à des remarques importantes.
+Montrons plutôt la distribution de la danceability en fonction des genres, afin de visualiser quels sont les 10 genres les plus dansants dans notre jeu de données.
+
+```{r echo=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+
+top_genres_dance <- spotify %>%
+  group_by(track_genre) %>%
+  summarise(danceability_mean = mean(danceability, na.rm = TRUE)) %>%
+  arrange(desc(danceability_mean)) %>%
+  slice_head(n = 10)
+
+top_genres <- top_genres_dance$track_genre
+
+ggplot(spotify %>% filter(track_genre %in% top_genres), 
+       aes(x = track_genre, y = danceability, fill = track_genre)) +
+  geom_violin() +
+  coord_flip() +
+  labs(title = "Distribution de la danceability des genres les plus dansants",
+       x = "Genre musical", y = "Danceability") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Sans surprise, le reggaeton, le reggae et le minimal-techno font partie des genres les plus dansants.
+
+# Composantes principales du jeu de données
+
+Cette phase nous permet d'analyser les relations entre les variables du même type (quantitatif ou qualitatif). 
+Pour cela, nous utilisons des méthodes factorielles. Premièrement, nous analysons les dimensions principales expliquant la variabilité des morceaux selon leurs caractéristiques numériques, l'aide d'une Analyse en Composantes Principales (ACP).
+
+Ensuite, nous regarderons les liaisons entre nos variables qualitatives. Nous utiliserons deux méthodes : l'Analyse Factorielle des Correspondances (AFC), pour analyser le lien entre deux variables qualitatives, ainsi que l'Analyse des Correspondances Multiples (AFCM) pour analyser le lien entre plusieurs variables qualitatives.
+
+D'abord, analysons les relations entre les variables quantitatives du jeu de données.
+
+```{r echo=FALSE, warning=FALSE}
+library(FactoMineR)
+spotify_quanti = spotify[,c(-1,-2,-3,-4,-7,-10,-12,-19,-20)]
+spotify.pca=PCA(spotify_quanti, graph=F)
+par(mfrow=c(1,2))
+plot(spotify.pca$eig[,1], type ='b', main="Ebouli des valeurs propres", xlab="Composante", ylab ="")
+abline(h=1)
+```
+
+On ne peut mener l'analyse qu'avec au moins 2 variables, or la méthode du coude nous indique de ne garder que la première composante principale. D'après le critère de Kaiser, on retient les 4 premières composantes principales, expliquant 60.79% de l'inertie totale.
+
+Visualisons les résultats afin de déterminer les principales dimensions d'analyse.
+
+
+```{r warning=FALSE, echo=FALSE}
+library(gridExtra)
+
+p1 <- plot(spotify.pca, choix = "var")
+p2 <- plot(spotify.pca, choix = "var", axes = 3:4)
+
+grid.arrange(p1, p2, ncol = 2)
+```
+
+On retrouve des résultats de la phase d'exploration, comme par exemple la forte corrélation entre energy et loudness.
+
+La première composante principale sépare les morceaux énergiques, bruyants, dansants et joyeux des morceaux instrumentaux et acoustiques. Autrement dit, la première composante principale représente l'intensité globale des morceaux Spotify.
+
+La deuxième composante principale sépare les morceaux dansants, joyeux, acoustiques des morceaux instrumentaux, longs et énergiques. Cette deuxième composante principale indique à quel point une musique est entraînante, au sens de la danse, de la fête (morceaux joyeux ou non).
+
+Au vu de la faible représentation de la plupart des variables sur l'axe 3, il est compliqué d'en tirer une séparation claire de groupes de morceaux. Ceci dit, on remarque que cet axe illustre bien la corrélation positive entre la verbosité d'un morceau, sa probabilité d'être acoustique et sa probabilité d'avoir été enregistré en live.
+
+La quatrième composante principale est plus intéressante, puisqu'elle sépare les morceaux populaires des morceaux instrumentaux et dansants. Autrement dit, la quatrième composante principale représente la popularité d'un morceau.
+
+On remarque également l'indépendance entre le fait qu'un morceau soit populaire et sa probabilité d'être acoustique ou d'avoir été enregistrée en live.
+
+
+```{r echo=FALSE, warning=FALSE}
+library(factoextra)
+seuil <- 0.05 # Définir le seuil de contribution
+contrib = round(spotify.pca$ind$contrib, 3)
+contrib_filtre <- contrib[apply(contrib, 1, function(x) any(x > seuil)), ]
+individus_filtrés <- rownames(contrib)[apply(contrib, 1, function(x) any(x > seuil))]
+fviz_pca_ind(spotify.pca, axes=1:2, select.ind = list(name = individus_filtrés), repel = TRUE)
+```
+On distingue 3 principaux groupes :
+ - le premier semble rassembler les musiques populaires, avec beaucoup de paroles et possiblement enregistré en direct.
+ - le deuxième rassemble des musiques avec un bpm élevé et une durée élevée aussi.
+ - le troisième regroupe les musiques instrumentales.
+ 
+```{r echo=FALSE}
+fviz_pca_ind(spotify.pca, axes=3:4, select.ind = list(name = individus_filtrés), repel = TRUE)
+```
+ 
+On distingue 2 principaux groupes :
+ - le premier rassemble les musiques riches en paroles.
+ - le deuxième regroupe les musiques instrumentales, longues, qui donnent envie de danser mais peu populaires
+
+
+En résumé, l'Analyse en Composantes Principales nous a permis d'établir 3 dimensions d'analyse (l'axe 3 étant difficilement interprétable) : l'intensité globale, le degré d’entraînement/danse/joie et la popularité.
+
+Passons maintenant à l'analyse des correspondances entre les variables qualitatives de notre jeu de données.
+Nous analyserons le lien entre les variables les plus porteuses de sens : mode, key et explicit.
+
+On donne les probabilités critiques liée au Chi2 d'indépendance des différents couples de variables :
+
+```{r echo=FALSE}
+chisq.test(table(spotify$mode,spotify$explicit))$p.value
+chisq.test(table(spotify$mode,spotify$key))$p.value
+chisq.test(table(spotify$key,spotify$explicit))$p.value
+```
+
+Elles sont toutes très faibles, donc on peut rejeter l'hypothèse d'indépendance de ces variables.
+
+
+```{r echo=FALSE}
+x.afc = CA(table(spotify$mode,spotify$explicit))
+x.afc$eig
+
+x.afc = CA(table(spotify$mode,spotify$key))
+x.afc$eig
+
+x.afc = CA(table(spotify$key,spotify$explicit))
+x.afc$eig
+```
+
+Nous n'effectuons finalement pas d'AFC, car cette analyse ne renvoie qu'un seul axe d'inertie (qui explique 100% de l'inertie), du fait du nombre trop faible de modalités de certaines variables (2 modalités), ou du déséquilibre avec key qui en contient 12. L'AFC ne convient donc pas à nos données, donc nous réalisons directement une AFCM sur ces mêmes variables.
+
+```{r echo=FALSE}
+x = spotify[,c(7,10,12)]
+x.acm = MCA(x, ncp=13, graph=FALSE)
+library(ggplot2)
+modalités <- data.frame(x = x.acm$var$coord[, 1],
+y = x.acm$var$coord[, 2],
+labels = rownames(x.acm$var$coord))
+ggplot(modalités, aes(x = x, y = y)) +
+geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+geom_vline(xintercept = 0, linetype = "dashed", color = "black")+
+geom_text(aes(label = labels), size = 4) +
+labs(title = "Représentation des modalités - ACM",
+x = "Energie et grandeur",
+y = "Complexité") +
+theme_minimal()+
+theme(axis.title.x = element_text(hjust = 0.45, size = 12),
+axis.title.y = element_text(vjust = 0.3, angle = 0, size = 12),
+axis.text = element_text(size = 10))
+```
+
+Le premier axe sépare les morceaux faciles à jouer, agréables à l’oreille et joyeux des morceaux au langage vulgaire avec des tonalités plus complexes à jouer et qui donnent plus de contrastes à l’oreille.
+
+Le second axe sépare les morceaux chaleureux souvent utilisés dans les chorales des morceaux énergiques, qui inspirent la puissance et qui contiennent des paroles vulgaires.
+
+En résumé, l'axe 1 représente la complexité à jouer d'un morceau, tandis que l'axe 2 représente l'énergie et la grandeur d'un morceau.
+
+Dans l’ACP, nous avons remarqué que le premier axe séparait les musiques instrumentales et acoustiques des musiques plus énergiques. Nous avons retrouvé ce résultat dans l’AFCM : le second axe de l’analyse factorielle sépare les tonalités chaleureuses utilisées dans les chorales des tonalités plus énergiques. En résumé, le premier axe de l’ACP équivaut au second axe de l’AFCM.
+
+
+Résumons alors les groupes identifiés lors de nos deux analyses :
+
+L'ACP nous a permis d'identifier ces groupes :
+ - Groupe 1 : musiques populaires et vocales
+ - Groupe 2 : musiques avec un tempo et une durée élevées
+ - Groupe 3 : musiques instrumentales
+ - Groupe 4 : musiques riches en paroles
+ - Groupe 5 : musiques instrumentales, longues et dansantes
+ 
+L'AFCM distingue ces groupes, en tenant compte des contributions aux axes :
+ - Groupe 1 : musiques énergiques, avec des tonalités qui inspirent la “splendeur” et qui contiennent des paroles vulgaires
+ - Groupe 2 : musiques complexes à jouer, plutôt mélancoliques
+ - Groupe 3 : musiques positives, faciles à jouer et plutôt calmes
+ 
+
+## Fouille du dataset Spotify : quels groupes le constituent ?
+
+Cette dernière phase consiste à confirmer ou infirmer les assertions de groupes supposées précédemment.
+
+Afin de classifier les morceaux Spotify en différents sous-groupes, nous utilisons deux algorithmes : la Classification Ascendante Hiérarchique (CAH) et les K-Means.
+
+Ces algorithmes s'appliquent sur des variables quantitatives, mais en réalisant la CAH, nous intégrerons les variables qualitatives via une autre méthode. De plus, nous verrons que nous pouvons essayer de classifier selon le nom d'album.
+
+En tentant d'appliquer la CAH, nous apprenons que le dataset est trop volumineux pour être traité dans son intégralité. Nous décidons alors d'échantillonner.
+
+```{r echo=FALSE}
+library(clusterCrit)
+library(cluster)
+
+spotify_quant = spotify[,c("popularity", "duration_ms", "danceability", "energy", "loudness",
+                           "speechiness", "acousticness", "instrumentalness", "liveness", "valence", "tempo")]
+
+methods <- c("average", "single", "complete", "ward.D", "ward.D2", "centroid", "median")
+par(mfrow = c(3, 3))
+
+set.seed(123) # pour que l'échantillon reste le même pour chaque méthode afin de pouvoir les comparer
+var_quant <- c("popularity", "duration_ms", "danceability", "energy", "loudness",
+               "speechiness", "acousticness", "instrumentalness", "liveness", "valence", "tempo")
+spotify_ech <- spotify[sample(nrow(spotify), 10000),]
+spotify_quant_ech <- as.matrix(na.omit(spotify_ech[, var_quant]))
+results <- data.frame()
+d <- dist(spotify_quant_ech)
+for (m in methods) {
+  hc <- hclust(d, method = m)
+  for (k in 2:10) {
+    groups <- cutree(hc, k)
+    ch_score <- intCriteria(spotify_quant_ech, groups, "calinski_harabasz")$calinski_harabasz
+    results <- rbind(results, data.frame(methode = m, k = k, ch_score = ch_score))
+  }
+}
+
+ggplot(results, aes(x = k, y = ch_score, color = methode)) +
+  geom_line() + geom_point() +
+  labs(title = "Indice de Calinski-Harabasz en fonction de k",
+       x = "Nombre de clusters (k)",
+       y = "Calinski-Harabasz") +
+  theme_minimal()
+```
+
+Nous décidons de choisir k=6, car c’est le moment où la méthode ward.D2 se détache des autres, et n’est pas encore trop complexe (comme k=10).
+
+```{r echo=FALSE}
+hc_wD2 <- hclust(d, method = "ward.D2")
+plot(hc_wD2, hang =-1, labels = FALSE)
+rect.hclust(hc_wD2, k=6)
+groups <- cutree(hc_wD2, k=6)
+```
+
+On visualise les clusters avec k = 6. Mais notre jeu de données étant constitué de données mixtes (catégorielles et numériques), nous choisissons donc d’appliquer la méthode HCPC à nos données en ayant préalablement réalisé une AFDM. Cette méthode permet de réaliser une CAH sur les composantes principales.
+
+```{r echo=FALSE}
+var_qual <- c("explicit", "key", "mode")
+spotify_ech[var_qual] <- lapply(spotify_ech[var_qual], as.factor)
+res.famd <- FAMD(spotify_ech[, c(var_qual, var_quant)], ncp = 5, graph = FALSE)
+res.hcpc <- HCPC(res.famd, graph = FALSE)
+(unique(res.hcpc$data.clust$clust))
+```
+
+L'HCPC suggère 3 clusters pour regrouper les morceaux.
+
+```{r echo=FALSE}
+fviz_cluster(res.hcpc, geom = "point", main = "Factor map")
+```
+
+On remarque que les clusters 2 et 3 se chevauchent particulièrement.
+
+En nous basant sur l'analyse quantitative des clusters, le cluster 1 regroupe les morceaux acoustiques et instrumentaux, peu énergiques, peu populaires, avec un volume faible, une atmosphère plutôt triste (valence faible) et peu dansants.
+
+Le cluster 2 constitue l'opposé du cluster 1, puisqu'il rassemble des morceaux énergiques, dansants, joyeux et populaires, peu instrumentaux et peu acoustiques.
+
+Le cluster 3 est caractérisé par des morceaux verbeux (rap, podcasts). Le niveau d'énergie est d'ailleurs plus élevé dans ce cluster que la moyenne.
+
+Les morceaux d'un même cluster partagent des similarités sur le plan des tonalités, donc on peut penser que la tonalité joue un rôle important dans la formation des clusters.
+
+
+Testons maintenant le second algorithme : K-Means.
+Pour vérifier si l'algorithme capture bien les données, nous calculons le taux d'erreur à partir de la matrice de confusion pour chaque variable qualitative.
+
+```{r echo=FALSE}
+# mode
+kmeans.result <- kmeans(spotify_quant_ech, 2)
+mode_tt_donnee = table(spotify_ech$mode, kmeans.result$cluster)
+(taux_erreur = 1 - sum(diag(mode_tt_donnee))/ sum(mode_tt_donnee))
+# explicit
+explicit_tt_donnee = table(spotify_ech$explicit, kmeans.result$cluster)
+(taux_erreur = 1 - sum(diag(explicit_tt_donnee))/ sum(explicit_tt_donnee))
+# key
+key_tt_donnee = table(spotify_ech$key, kmeans.result$cluster)
+(taux_erreur = 1 - sum(diag(key_tt_donnee))/ sum(key_tt_donnee))
+```
+
+En confondant les clusters calculés avec les modalités, on obtient des taux d'erreur élevés pour les K-Means appliqués aux variables Key, Mode et Explicit.
+
+Appliquons cet algorithme en comparant avec le genre, d'abord avec k = 2 puis avec k = 114.
+
+Avec k = 2, voici les groupes identifiés :
+
+```{r echo=FALSE}
+kmeans.result <- kmeans(spotify_quant_ech, 2)
+genre_tt_donnee = table(spotify_ech$track_genre, kmeans.result$cluster)
+# Calcul du pourcentage dans le cluster 1
+genre_pct1 <- prop.table(genre_tt_donnee, 1)[,1] * 100
+# Filtrer les genres avec plus de 95% dans le cluster 1
+genres_95plus_cluster1 <- genre_pct1[genre_pct1 > 95]
+genres_60plus_cluster1 <- genre_pct1[genre_pct1 > 60]
+genre_pct2 <- prop.table(genre_tt_donnee, 1)[,2] * 100
+genres_95plus_cluster2 <- genre_pct2[genre_pct2 > 95]
+genres_60plus_cluster2 <- genre_pct2[genre_pct2 > 60]
+```
+
+Un des cluster regroupe majoritairement :
+ -  des genres très dansants et populaires : dance, edm, reggaeton, house, party
+ -  des musiques pour un public spécifique ou ciblé : children, kids, study, sad, disney
+ -  des styles traditionnels ou régionaux : forro, tango, honky-tonk, country
+ -  des sous-genres rock rétro : rockabilly, rock-n-roll
+
+Probablement des morceaux très rythmés, joyeux ou accessibles, avec haute dansabilité ou énergie élevée, ou
+usage spécifique (étude, enfants...).
+
+Un autre contient des styles :
+ -  Très spécialisés, underground, souvent instrumentaux.
+ -  Ils ont souvent :
+ -  une basse complexité harmonique,
+ -  des structures répétitives,
+ - et sont moins orientés vers la voix ou les paroles.
+Probablement des morceaux avec haute instrumentalité, basse valence (moins joyeux), tempo soutenu mais
+moins varié, et une audience plus niche ou expérimentale.
+
+Quels sont les genres où la répartition est presque égale dans les clusters ?
+
+```{r echo=FALSE}
+genre_melange <- genre_pct1[genre_pct1 >= 40 & genre_pct1 <= 60]
+print(names(genre_melange))
+```
+
+Ces genres, en leur tour, présentent une répartition presque équilibrée entre les deux clusters, ce qui reflète
+une grande diversité interne
+
+Avec k = 114, voyons quels résultats on obtient.
+
+```{r echo=FALSE, warning=FALSE}
+kmeans.result <- kmeans(spotify_quant_ech, 114)
+genre_114 = table(spotify_ech$track_genre, kmeans.result$cluster)
+(taux_erreur = 1 - sum(diag(genre_114))/ sum(genre_114))
+```
+
+Le taux d'erreur est extrêmement élevé (99.37%), ce qui confirme que la granularité choisie (k = 114) est trop fine. Cela entraîne une forte dilution des clusters : ils ne parviennent plus à capturer des structures cohérentes. On constate une limite majeure des K-Means avec un jeu de données comme le notre. Testons sa variante : K-Medoids. 
+Voyons les nouveaux taux d'erreurs des matrices de confusion pour chacune des variables qualitatives.
+
+```{r echo=FALSE}
+mem.maxVSize(16000000)
+# mode
+pam.result <- pam(spotify_quant_ech, 3)
+plot(pam.result)
+```
+
+
+On voit bien que K-Medoids n'est pas non plus approprié à nos données.
+
+Tentons tout de même d'appliquer les K-Means à l'ACP, avec k = 3, selon les résultats de la CAH.
+
+```{r echo=FALSE}
+spotify.pca=PCA(spotify_quant_ech, graph=F)
+acp = spotify.pca$ind$coord[,-5]
+kmeans.result <- kmeans(acp, 3)
+plot(acp[,c(1,2)], col = kmeans.result$cluster)
+```
+
+Le premier plan principal permet de bien distinguer les 3 clusters, qui ne se chevauchent presque pas. Cela suggère que la réduction de dimension a permis de structurer l’information utile à la classification.
+On peut interpréter les clusters comme cela :
+**Noir** : morceaux longs, rapides, énergiques et bruyants.
+**Rouge** : morceaux dominés par des paroles, dansants et positifs.
+**Vert** : morceaux acoustiques et instrumentaux.
+Ces clusters rejoignent ceux que l’HCPC a permis de déduire, et ce sont les groupes que nous retiendrons finalement.
+
+Il reste néanmoins une variable qualitative traitable : le nom d'album. Peut-on regrouper des morceaux en se basant sur le sens, le thème de l'album auquel ils appartiennent ?
+
+Là encore, on échantillonne à 100 individus pour des raisons de capacité de calcul.
+
+```{r echo=FALSE, warning=FALSE, message = FALSE}
+library(proxy)
+library(igraph)
+library(tm)
+
+set.seed(123)
+spotify_ech <- spotify[sample(nrow(spotify), 100),]
+album_tm = Corpus(VectorSource(spotify_ech$album_name))
+album_tm = tm_map(album_tm, content_transformer(tolower))
+album_tm = tm_map(album_tm, removePunctuation)
+album_tm = tm_map(album_tm, removeWords, stopwords("fr"))
+album_tm = tm_map(album_tm, stripWhitespace)
+
+tdm_tfidf <- TermDocumentMatrix(album_tm, control = list(weighting = weightTfIdf))
+library(Matrix)
+
+tdm_tfidf = as.matrix(tdm_tfidf)
+
+doc_vectors = t(tdm_tfidf)
+doc_vectors = doc_vectors[rowSums(doc_vectors)>0,]
+doc_vectors = as.matrix(doc_vectors)
+library(proxyC)
+
+similarity_matrix = simil(doc_vectors, method = "cosine")
+dist_mat = as.dist(1-similarity_matrix)
+
+cah <- hclust(dist_mat, method = "ward.D2")
+plot(cah, hang =-1, labels = FALSE)
+rect.hclust(cah, k=3)
+groups <- cutree(cah, k=3)
+(ch_score <- intCriteria(doc_vectors, groups, "calinski_harabasz")$calinski_harabasz)
+```
+
+
+Après avoir converti chaque nom d'album sous la forme d'un vecteur où chaque mot est représenté par le poids tf*idf, nous obtenons le dendrogramme de la CAH mené dessus avec k = 3. Le critère d'inertie nous informe que la classification n'est pas de bonne qualité.
+
+```{r echo=FALSE, message=FALSE}
+kmeans.result = kmeans(doc_vectors, 3)
+confusion = table(kmeans.result$cluster, groups)
+(taux_erreur = 1 - sum(diag(confusion))/ sum(confusion))
+
+kmedoids.result = pam(doc_vectors, 3)
+confusion = table(kmedoids.result$cluster, groups)
+(taux_erreur = 1 - sum(diag(confusion))/ sum(confusion))
+
+library(kernlab)
+clust = specc(doc_vectors, centers = 3)
+confusion = table(clust, groups)
+(taux_erreur = 1 - sum(diag(confusion))/ sum(confusion))
+```
+
+Après avoir appliqué successivement K-Means, K-Medoids et un clustering spectral, le taux d'erreur reste élevé.
+
+Malgré tout, pour K-Medoids il n'est "que" de 20% !
+
+Visualisons les proximités entre les morceaux.
+
+```{r echo=FALSE}
+seuil = 0.5
+sim_mat_thresh <- similarity_matrix
+sim_mat_thresh[sim_mat_thresh < seuil] <- 0
+diag(sim_mat_thresh) <- 0
+library(igraph)
+g <- graph_from_adjacency_matrix(sim_mat_thresh, mode = "undirected", weighted = TRUE, diag = FALSE)
+V(g)$cluster <- as.factor(clust)
+V(g)$label <- rownames(doc_vectors)
+library(RColorBrewer)
+nb_clusters <- length(unique(clust))
+colors <- brewer.pal(min(nb_clusters, 8), "Set2") # max 8 sinon faut étendre
+V(g)$color <- colors[as.numeric(V(g)$cluster)]
+plot(g,
+vertex.label = NA,
+vertex.size = 5,
+edge.width = E(g)$weight * 5,
+layout = layout_with_fr(g),
+main = "Graphe de similarité des noms d'albums (TF-IDF + Spectral Clustering)")
+```
+
+Ce graphique illustre les liens sémantiques potentiels entre certains noms d'albums. Toutefois, peu de sommets sont connectés : cela confirme la rareté des mots partagés entre les titres d'albums. Ce résultat souligne une limite importante de l’approche TF-IDF sur de courts textes avec peu de vocabulaire commun. Quelques morceaux semblent très proches, mais ils sont marginaux.
+
+Plusieurs hypothèses peuvent être faites sur notre difficulté à classifier les noms d’albums. La première qui
+vient à l’esprit est le trop petit nombre de mots différents au sein de chaque nom d’album, ce qui donne une
+matrice tf idf où tous les mots sont rares, c’est-à-dire que très peu d’albums possèderont au moins un mot
+en commun. Cette hypothèse nous amène naturellement à la seconde : l’échantillon est trop petit. Pour des raisons de capacités de calcul, l’échantillon ne comporte que 100 morceaux. Or, pour que plus de noms
+d’albums partagent au moins un mot en commun, il faudrait augmenter ce nombre.
+
+# Conclusion
+
+L’objectif de cette étude était de regrouper les morceaux de notre jeu de données Spotify selon leurs caractéristiques, quantitatives et qualitatives, afin de mettre en évidence des structures ou des similarités entre eux. Après un prétraitement des données et l’exploration de différentes techniques de classification non supervisée, plusieurs constats ont pu être établis :
+
+Limites des méthodes classiques sur données brutes :
+L'application directe de l’algorithme des K-Means sur l’ensemble des variables quantitatives a été peu concluante. Avec un taux d’erreur supérieur à 99%, les clusters obtenus étaient mal définis et superposés. L’algorithme des K-Medoids, même s’il est plus robuste aux valeurs aberrantes, n’a pas non plus produit de regroupements clairs.
+
+Apport de la réduction dimensionnelle (ACP) :
+L’utilisation de l’Analyse en Composantes Principales a été très important dans notre  étude car en projetant les données dans un espace à faible dimension, K-Means a permis de former trois clusters cohérents et interprétables : un premier groupe rassemblant des morceaux , bruyants, rapides et énergiques ; un second avec des morceaux à dominante vocale, dansants et à forte valence ; un troisième composé de musiques instrumentales, plus douces et acoustiques.
+Ces regroupements sont en adéquation avec les résultats de la classification hiérarchique (CAH), qui montrent la pertinence de cette approche.
+
+Exploration des variables textuelles (noms d’albums) :
+En traitant les noms d’albums comme des documents textuels à l’aide de la méthode tf-idf, puis en appliquant des méthodes comme la CAH, K-Means, K-Medoids et le clustering spectral, les résultats ont été mitigés. Les méthodes classiques n’ont pas réussi à capter une structure. Le clustering spectral obtient un taux d’erreur minime, et les K-Medoids atteignent un taux d’erreur de seulement 20%. Cependant, la nature même des noms d’albums (très courts et rarement redondants) et la taille réduite de l’échantillon (100 albums) limitent fortement la pertinence de ces résultats.
+
+Analyse des variables qualitatives :
+En évaluant les variables qualitatives comme mode, key et explicit, il est apparu que celles-ci sont faiblement discriminantes en termes de regroupement. Les taux d’erreur élevés (souvent proches de 50%) montrent que ces variables ne suffisent pas, à elles seules, à structurer les clusters de manière significative.
+
+**Bilan global**
+
+Cette étude montre que l’analyse en composantes principales, couplée à un algorithme de clustering comme K-Means ou HCPC, constitue la combinaison la plus performante pour segmenter les morceaux de musique en groupes homogènes et interprétables. Les variables quantitatives musicales (tempo, durée, valence, énergie, etc.) jouent un rôle central dans la structuration de la segmentation.
+En revanche, les approches textuelles ou basées sur certaines variables qualitatives nécessitent des volumes de données bien plus importants pour espérer obtenir des résultats significatifs. Ces pistes restent cependant intéressantes à approfondir, notamment à l’aide de modèles de traitement du langage naturel plus avancés et sur des données plus larges.
+
+
+# Annexes
+
+## Chargement du jeu de données
+
+Nous nous servons des leçons tirées sur ce dataset pour pré-traiter les données directement en amont.
+
+```{r eval=FALSE}
+spotify = read.csv("spotify.csv")
+spotify <- spotify[,-1] # X
+spotify <- spotify[,-19] # time_signature
+
+spotify$mode <- as.factor(spotify$mode)
+levels(spotify$mode) <- c("mineure", "majeure")
+spotify$key <- as.factor(spotify$key)
+levels(spotify$key) <- c("C", "C#/Db", "D", "D#/Eb",
+"E", "F", "F#/Gb", "G",
+"G#/Ab", "A", "A#/Bb", "B")
+spotify$track_genre <- as.factor(spotify$track_genre)
+spotify$explicit <- as.logical(spotify$explicit)
+```
+
+
+## Structure globale du dataset spotify
+
+```{r eval=FALSE}
+dimension = dim(spotify)
+names(spotify)
+spotify$duration_s = round(spotify$duration_ms/1000)
+
+library(questionr)
+layout(
+  matrix(c(
+    1, 1, 2,
+    1, 1, 3
+  ), nrow = 2, byrow = TRUE), 
+  widths = c(2, 1, 1), 
+  heights = c(1, 1)
+)
+par(mar = c(4, 4, 4, 2), oma = c(0, 0, 2, 0))
+barplot(freq(spotify$key)$`%`, names.arg = row.names(freq(spotify$key)), main = "Key")
+barplot(freq(spotify$explicit)$`%`, names.arg = row.names(freq(spotify$explicit)), main = "Explicit")
+barplot(freq(spotify$mode)$`%`, names.arg = row.names(freq(spotify$mode)), main = "Mode")
+mtext("Répartition des modalités parmi les morceaux", outer = TRUE, cex = 1.5)
+par(mfrow = c(1, 1))
+layout(1)
+
+freq(spotify$track_genre)[1:5,]
+
+par(mfrow = c(3, 3), mar = c(4, 4, 2, 1), oma = c(0, 0, 2, 0))
+
+hist(spotify$popularity, main = "Popularity", xlab ="")
+hist(spotify$duration_s, main = "Duration_s", xlab ="")
+hist(spotify$loudness, main = "Loudness", xlab ="")
+hist(spotify$speechiness, main = "Speechiness", xlab ="")
+hist(spotify$acousticness, main = "Acousticness", xlab ="")
+hist(spotify$instrumentalness, main = "Instrumentalness", xlab ="")
+hist(spotify$liveness, main = "Liveness", xlab ="")
+mtext("Distribution des variables quantitatives", outer = TRUE, cex = 1.5)
+
+par(mfrow = c(1, 1))
+
+par(mfrow = c(1, 1))
+library(reshape2)
+numeric_spotify <- spotify[sapply(spotify, is.numeric)] 
+cor_matrix <- round(cor(numeric_spotify[,-2], use = "pairwise.complete.obs"),2)
+cor_long <- melt(cor_matrix, varnames = c("Var1", "Var2"), value.name = "Correlation")
+cor_filtered <- cor_long[cor_long$Var1 != cor_long$Var2 & abs(cor_long$Correlation) > 0.50, ]
+cor_filtered_unique <- cor_filtered[!duplicated(t(apply(cor_filtered[,1:2], 1, sort))), ]
+cor_filtered_unique
+
+par(mfrow = c(3, 1), mar = c(5, 5, 3, 2), oma = c(0, 0, 3, 0))
+plot(spotify$energy, spotify$loudness, col = "darkblue", xlab = "energy", ylab = "loudness (en dB)")
+plot(spotify$acousticness, spotify$energy, col = "darkblue", xlab = "acousticness", ylab = "energy")
+plot(spotify$acousticness, spotify$loudness, col = "darkblue", xlab = "acousticness", ylab = "loudness (en dB)")
+par(mfrow = c(1, 1))
+
+library(ggplot2)
+library(dplyr)
+
+top_genres_dance <- spotify %>%
+  group_by(track_genre) %>%
+  summarise(danceability_mean = mean(danceability, na.rm = TRUE)) %>%
+  arrange(desc(danceability_mean)) %>%
+  slice_head(n = 10)
+
+top_genres <- top_genres_dance$track_genre
+
+ggplot(spotify %>% filter(track_genre %in% top_genres), 
+       aes(x = track_genre, y = danceability, fill = track_genre)) +
+  geom_violin() +
+  coord_flip() +
+  labs(title = "Distribution de la danceability des genres les plus dansants",
+       x = "Genre musical", y = "Danceability") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+top_artists <- names(sort(table(spotify$artists), decreasing = TRUE)[1:10])
+ggplot(spotify[spotify$artists %in% top_artists, ], aes(x = track_genre, fill = artists)) +
+geom_bar() +
+theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+labs(title = "Nombre de morceaux par genre et par artiste",
+x = "Genre musical", y = "Nombre de morceaux", fill = "Artistes")
+```
+
+## Composantes principales du jeu de données
+
+```{r eval=FALSE}
+# ACP
+library(FactoMineR)
+spotify_quanti = spotify[,c(-1,-2,-3,-4,-7,-10,-12,-19,-20)]
+spotify.pca=PCA(spotify_quanti, graph=F)
+par(mfrow=c(1,2))
+plot(spotify.pca$eig[,1], type ='b', main="Ebouli des valeurs propres", xlab="Composante", ylab ="")
+abline(h=1)
+
+library(gridExtra)
+
+p1 <- plot(spotify.pca, choix = "var")
+p2 <- plot(spotify.pca, choix = "var", axes = 3:4)
+
+grid.arrange(p1, p2, ncol = 2)
+
+
+
+library(factoextra)
+seuil <- 0.05 # Définir le seuil de contribution
+contrib = round(spotify.pca$ind$contrib, 3)
+contrib_filtre <- contrib[apply(contrib, 1, function(x) any(x > seuil)), ]
+individus_filtrés <- rownames(contrib)[apply(contrib, 1, function(x) any(x > seuil))]
+fviz_pca_ind(spotify.pca, axes=1:2, select.ind = list(name = individus_filtrés), repel = TRUE)
+
+fviz_pca_ind(spotify.pca, axes=3:4, select.ind = list(name = individus_filtrés), repel = TRUE)
+
+
+
+# AFC
+chisq.test(table(spotify$mode,spotify$explicit))$p.value
+chisq.test(table(spotify$mode,spotify$key))$p.value
+chisq.test(table(spotify$key,spotify$explicit))$p.value
+
+x.afc = CA(table(spotify$mode,spotify$explicit))
+x.afc$eig
+
+x.afc = CA(table(spotify$mode,spotify$key))
+x.afc$eig
+
+x.afc = CA(table(spotify$key,spotify$explicit))
+x.afc$eig
+
+# AFCM
+x = spotify[,c(7,10,12)]
+x.acm = MCA(x, ncp=13, graph=FALSE)
+library(ggplot2)
+modalités <- data.frame(x = x.acm$var$coord[, 1],
+y = x.acm$var$coord[, 2],
+labels = rownames(x.acm$var$coord))
+ggplot(modalités, aes(x = x, y = y)) +
+geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+geom_vline(xintercept = 0, linetype = "dashed", color = "black")+
+geom_text(aes(label = labels), size = 4) +
+labs(title = "Représentation des modalités - ACM",
+x = "Energie et grandeur",
+y = "Complexité") +
+theme_minimal()+
+theme(axis.title.x = element_text(hjust = 0.45, size = 12),
+axis.title.y = element_text(vjust = 0.3, angle = 0, size = 12),
+axis.text = element_text(size = 10))
+```
+
+## Fouille
+
+```{r eval=FALSE}
+library(clusterCrit)
+library(cluster)
+
+spotify_quant = spotify[,c("popularity", "duration_ms", "danceability", "energy", "loudness",
+                           "speechiness", "acousticness", "instrumentalness", "liveness", "valence", "tempo")]
+
+methods <- c("average", "single", "complete", "ward.D", "ward.D2", "centroid", "median")
+par(mfrow = c(3, 3))
+
+set.seed(123) # pour que l'échantillon reste le même pour chaque méthode afin de pouvoir les comparer
+var_quant <- c("popularity", "duration_ms", "danceability", "energy", "loudness",
+               "speechiness", "acousticness", "instrumentalness", "liveness", "valence", "tempo")
+spotify_ech <- spotify[sample(nrow(spotify), 10000),]
+spotify_quant_ech <- as.matrix(na.omit(spotify_ech[, var_quant]))
+results <- data.frame()
+d <- dist(spotify_quant_ech)
+for (m in methods) {
+  hc <- hclust(d, method = m)
+  for (k in 2:10) {
+    groups <- cutree(hc, k)
+    ch_score <- intCriteria(spotify_quant_ech, groups, "calinski_harabasz")$calinski_harabasz
+    results <- rbind(results, data.frame(methode = m, k = k, ch_score = ch_score))
+  }
+}
+ggplot(results, aes(x = k, y = ch_score, color = methode)) +
+  geom_line() + geom_point() +
+  labs(title = "Indice de Calinski-Harabasz en fonction de k",
+       x = "Nombre de clusters (k)",
+       y = "Calinski-Harabasz") +
+  theme_minimal()
+
+
+hc_wD2 <- hclust(d, method = "ward.D2")
+plot(hc_wD2, hang =-1, labels = FALSE)
+rect.hclust(hc_wD2, k=6)
+groups <- cutree(hc_wD2, k=6)
+
+var_qual <- c("explicit", "key", "mode")
+spotify_ech[var_qual] <- lapply(spotify_ech[var_qual], as.factor)
+res.famd <- FAMD(spotify_ech[, c(var_qual, var_quant)], ncp = 5, graph = FALSE)
+res.hcpc <- HCPC(res.famd, graph = FALSE)
+(unique(res.hcpc$data.clust$clust))
+
+fviz_cluster(res.hcpc, geom = "point", main = "Factor map")
+
+# mode
+kmeans.result <- kmeans(spotify_quant_ech, 2)
+mode_tt_donnee = table(spotify_ech$mode, kmeans.result$cluster)
+(taux_erreur = 1 - sum(diag(mode_tt_donnee))/ sum(mode_tt_donnee))
+# explicit
+kmeans.result <- kmeans(spotify_quant_ech, 2)
+explicit_tt_donnee = table(spotify_ech$explicit, kmeans.result$cluster)
+(taux_erreur = 1 - sum(diag(explicit_tt_donnee))/ sum(explicit_tt_donnee))
+# key
+kmeans.result <- kmeans(spotify_quant_ech, 12)
+key_tt_donnee = table(spotify_ech$key, kmeans.result$cluster)
+(taux_erreur = 1 - sum(diag(key_tt_donnee))/ sum(key_tt_donnee))
+
+kmeans.result <- kmeans(spotify_quant_ech, 2)
+genre_tt_donnee = table(spotify_ech$track_genre, kmeans.result$cluster)
+# Calcul du pourcentage dans le cluster 1
+genre_pct1 <- prop.table(genre_tt_donnee, 1)[,1] * 100
+# Filtrer les genres avec plus de 95% dans le cluster 1
+genres_95plus_cluster1 <- genre_pct1[genre_pct1 > 95]
+genres_60plus_cluster1 <- genre_pct1[genre_pct1 > 60]
+genre_pct2 <- prop.table(genre_tt_donnee, 1)[,2] * 100
+genres_95plus_cluster2 <- genre_pct2[genre_pct2 > 95]
+genres_60plus_cluster2 <- genre_pct2[genre_pct2 > 60]
+
+genre_melange <- genre_pct1[genre_pct1 >= 40 & genre_pct1 <= 60]
+print(names(genre_melange))
+
+kmeans.result <- kmeans(spotify_quant_ech, 114)
+genre_114 = table(spotify_ech$track_genre, kmeans.result$cluster)
+(taux_erreur = 1 - sum(diag(genre_114))/ sum(genre_114))
+
+mem.maxVSize(16000000)
+# mode
+pam.result <- pam(spotify_quant_ech, 3)
+plot(pam.result)
+
+spotify.pca=PCA(spotify_quant_ech, graph=F)
+acp = spotify.pca$ind$coord[,-5]
+kmeans.result <- kmeans(acp, 3)
+plot(acp[,c(1,2)], col = kmeans.result$cluster)
+
+library(proxy)
+library(igraph)
+library(tm)
+
+set.seed(123)
+spotify_ech <- spotify[sample(nrow(spotify), 100),]
+album_tm = Corpus(VectorSource(spotify_ech$album_name))
+album_tm = tm_map(album_tm, content_transformer(tolower))
+album_tm = tm_map(album_tm, removePunctuation)
+album_tm = tm_map(album_tm, removeWords, stopwords("fr"))
+album_tm = tm_map(album_tm, stripWhitespace)
+
+tdm_tfidf <- TermDocumentMatrix(album_tm, control = list(weighting = weightTfIdf))
+library(Matrix)
+
+tdm_tfidf = as.matrix(tdm_tfidf)
+
+doc_vectors = t(tdm_tfidf)
+doc_vectors = doc_vectors[rowSums(doc_vectors)>0,]
+doc_vectors = as.matrix(doc_vectors)
+library(proxyC)
+
+similarity_matrix = simil(doc_vectors, method = "cosine")
+dist_mat = as.dist(1-similarity_matrix)
+
+cah <- hclust(dist_mat, method = "ward.D2")
+plot(cah, hang =-1, labels = FALSE)
+rect.hclust(cah, k=3)
+groups <- cutree(cah, k=3)
+(ch_score <- intCriteria(doc_vectors, groups, "calinski_harabasz")$calinski_harabasz)
+
+kmeans.result = kmeans(doc_vectors, 3)
+confusion = table(kmeans.result$cluster, groups)
+(taux_erreur = 1 - sum(diag(confusion))/ sum(confusion))
+
+kmedoids.result = pam(doc_vectors, 3)
+confusion = table(kmedoids.result$cluster, groups)
+(taux_erreur = 1 - sum(diag(confusion))/ sum(confusion))
+
+library(kernlab)
+clust = specc(doc_vectors, centers = 3)
+confusion = table(clust, groups)
+(taux_erreur = 1 - sum(diag(confusion))/ sum(confusion))
+
+
+
+
+
+seuil = 0.5
+sim_mat_thresh <- similarity_matrix
+sim_mat_thresh[sim_mat_thresh < seuil] <- 0
+diag(sim_mat_thresh) <- 0
+library(igraph)
+g <- graph_from_adjacency_matrix(sim_mat_thresh, mode = "undirected", weighted = TRUE, diag = FALSE)
+V(g)$cluster <- as.factor(clust)
+V(g)$label <- rownames(doc_vectors)
+library(RColorBrewer)
+nb_clusters <- length(unique(clust))
+colors <- brewer.pal(min(nb_clusters, 8), "Set2") # max 8 sinon faut étendre
+V(g)$color <- colors[as.numeric(V(g)$cluster)]
+plot(g,
+vertex.label = NA,
+vertex.size = 5,
+edge.width = E(g)$weight * 5,
+layout = layout_with_fr(g),
+main = "Graphe de similarité des noms d'albums (TF-IDF + Spectral Clustering)")
+```
