@@ -1,6 +1,5 @@
 ---
-title: 'Rapport final : données Spotify'
-author: "CHARREYRE - GISSINGER - NOBILE - TERENTIEVA - VOLKAERT"
+title: 'Rapport final : analyse multivariée  des données Spotify'
 date: "2025-04-22"
 output:
   pdf_document: default
